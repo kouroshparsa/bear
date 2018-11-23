@@ -26,20 +26,6 @@ def callit(func, conn, *args):
     conn.close()
 
 
-class MyProcess(Process):
-    def __init__(self, *args, **kwargs):
-        mp.Process.__init__(self, *args, **kwargs)
-        self.parent_conn, self.child_conn = Pipe()
-        self._exception = None
-
-    def run(self):
-        try:
-            Process.run(self)
-            self.child_conn.send(None)
-        except Exception as e:
-            tb = traceback.format_exc()
-            self.child_conn.send((e, tb))
-
 def profile(path):
     def decor(func):
         def wrap(*args, **kwargs):
@@ -106,6 +92,12 @@ class Task(object):
     def __init__(self, caller, timeout=None, reserved_mem=None,\
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,\
         stdin=subprocess.PIPE):
+        """
+        timeout is in seconds
+        reserved_mem is in bytes. It's how much memory this task requires
+            when using the Pipeline, it allows you to wait until there is enough
+            memory in the operating system for the task to run successfuly
+        """
         self.timeout = None
         self.reserved_mem = None
         self.caller = caller
