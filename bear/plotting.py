@@ -5,6 +5,7 @@ matplotlib.use('agg') # run headless
 import matplotlib.pyplot as plt
 from matplotlib.path import Path
 import matplotlib.patches as patches
+from datetime import datetime
 
 def draw_path(start, end, y, thickness, ax):
     verts = [
@@ -46,7 +47,34 @@ def draw_intervals(path, stats):
 
 def plot_tasks(tasks, path):
     # sort task by start time:
-    tasks = sorted(self.tasks,
+    tasks = sorted(tasks,
         key=lambda x: datetime.strptime(x.start_time, '%m/%d/%y %H:%M'), reverse=True)
+    # TODO
 
+
+def plot_tasks_duration(tasks, path):
+    # sort task by start time:
+    tasks = sorted(tasks,
+        key=lambda x: x.start_time, reverse=True)
+    x = range(len(tasks))
+    labels = [task.func_name for task in tasks]
+    y = [(task.end_time - task.start_time).seconds for task in tasks]
+    plt.bar(x, y)
+    plt.xticks(x, labels, rotation=45)
+    plt.ylabel('Duration in seconds')
+    plt.savefig(path)
+
+
+def plot_tasks_memory(tasks, path):
+    # sort task by start time:
+    tasks = sorted(tasks,
+        key=lambda x: x.start_time, reverse=True)
+
+    x = range(len(tasks))
+    labels = [task.func_name for task in tasks]
+    y = [task.max_mem for task in tasks]
+    plt.xticks(x, labels, rotation=45)
+    plt.ylabel('Max RSS memory used')
+    plt.bar(x, y)
+    plt.savefig(path)
 

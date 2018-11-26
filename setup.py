@@ -10,7 +10,7 @@ Link
 """
 from setuptools import Command, setup, find_packages
 
-version = '1.0'
+version = '1.1'
 import sys
 setup(
     name='bear',
@@ -23,7 +23,7 @@ setup(
     description='asynchronous parallelization pipeline',
     long_description=__doc__,
     packages=find_packages(),
-    install_requires = [],
+    install_requires = ['psutil', 'matplotlib'],
     include_package_data=True,
     package_data = {'bear': []},
     zip_safe=False,

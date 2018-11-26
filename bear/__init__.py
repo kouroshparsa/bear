@@ -301,7 +301,11 @@ class Pipeline(object):
     def save_stats(self, path):
         json.dump(self.get_stats(), open(path, 'w'))
 
-    def plot_tasks(self, path):
-        """ plots the tasks and saves it to an image """
-        plotting.plot_tasks(self.tasks, path)
+    def plot_tasks_duration(self, path):
+        """ plots the task durations and saves it to an image """
+        plotting.plot_tasks_duration(self.tasks, path)
+
+    def plot_tasks_memory(self, path):
+        """ plots the task max memory and saves it to an image """
+        plotting.plot_tasks_memory(self.tasks, path)
 

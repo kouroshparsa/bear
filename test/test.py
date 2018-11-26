@@ -153,6 +153,15 @@ class TestBear(unittest.TestCase):
         stats = json.load(open(self.path2))
         assert isinstance(stats[0]['duration'], int)
 
+class TestPlots(unittest.TestCase):
+    """ test plotting functions """
+    def test_duration_plot(self):
+        pipe = Pipeline()
+        pipe.parallel_wait(subtract, [[1, 2], [-1, -2]])
+        pipe.parallel_wait(add, [[1, 2], [-1, -2]])
+        pipe.plot_tasks_duration('/tmp/x.png')
+        pipe.plot_tasks_memory('/tmp/y.png')
+
 
 if __name__ == '__main__':
     unittest.main()
