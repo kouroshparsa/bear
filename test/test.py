@@ -6,12 +6,13 @@ import os
 import sys
 import time
 import re
+import json
 import unittest
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.realpath("{}/..".format(BASE_DIR))
 sys.path.append(ROOT)
 
-from bear import Task, profile, parallel_wait, Pipeline
+from bear import Task, profile, parallel_wait, Pipeline, TaskError
 BIG_FILE_PATH = '/tmp/big_bear.txt'
 PROFILE_PATH = '/tmp/prof'
 
@@ -76,7 +77,7 @@ class TestMem(unittest.TestCase):
         for val in pipe.get_stats():
             stats[val['id']] = val['max_mem']
         assert stats['94a3f806fd092fdfd5d9a1f7ad8eaf0f'] > 200 * 1024 * 1024, 'Got:\n{}'.format(stats)
-        assert stats['fdd8ed4916c6e975c24085bc2b3df67a'] < 35 * 1024 * 1024, 'Got:\n{}'.format(stats)
+        assert stats['fdd8ed4916c6e975c24085bc2b3df67a'] < 45 * 1024 * 1024, 'Got:\n{}'.format(stats)
 
     @classmethod
     def tearDownClass(self):
@@ -86,21 +87,33 @@ class TestMem(unittest.TestCase):
 class TestBear(unittest.TestCase):
     """ general functional test """
     @classmethod
+    def cleanup(self):
+        self.path1 = '/tmp/bear.txt'
+        if os.path.exists(self.path1):
+            os.remove(self.path1)
+
+        self.path2 = '/tmp/bear.stat'
+        if os.path.exists(self.path2):
+            os.remove(self.path2)
+
+    @classmethod
     def setUpClass(self):
-        self.path = '/tmp/bear.txt'
-        if os.path.exists(self.path):
-            os.remove(self.path)
+        self.cleanup()
+
+    @classmethod
+    def tearDownClass(self):
+        self.cleanup()
 
     def test1(self):
-        handle = open(self.path, 'w')
+        handle = open(self.path1, 'w')
         tasks = [Task(add), Task(subtract), Task('echo hello', stdout=handle)]
         tasks[0].start(1, 2)
         tasks[1].start(1, 2)
         tasks[2].start()
         res = [task.wait() for task in tasks]
         print([task.get_stats() for task in tasks])
-        assert 'hello' in open(self.path, 'r').read()
-        os.remove(self.path)
+        assert 'hello' in open(self.path1, 'r').read()
+        os.remove(self.path1)
 
 
     def test2(self):
@@ -126,6 +139,19 @@ class TestBear(unittest.TestCase):
         assert stats[0]['duration'] == stats[1]['duration'] == 2,\
             'The duration is wrong. Expected 2, Actual {} and {}'.format(\
             2, stats[0]['duration'], stats[1]['duration'])
+
+
+    def test6(self):
+        pipe = Pipeline()
+        with self.assertRaises(TaskError) as context:
+            pipe.parallel_wait(subtract, [[1, 2], [1, 'x']])
+
+    def test7(self):
+        pipe = Pipeline()
+        pipe.parallel_wait(subtract, [[1, 2], [-1, -2]])
+        pipe.save_stats(self.path2)
+        stats = json.load(open(self.path2))
+        assert isinstance(stats[0]['duration'], int)
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@ import pstats
 import traceback
 import logging
 import psutil
+import json
 from bear import plotting
 logger = logging.getLogger(__name__)
 
@@ -69,29 +70,68 @@ def get_total_mem(pid):
     return mem
 
 
-class MemMonitor(Thread):
-    """ Thread used for monitoring the RSS memory of a process """
-    def __init__(self, pid):
+class TaskMonitor(Thread):
+    """ Thread used for monitoring the RSS memory and state of a process """
+    def __init__(self, task):
         """ constructor """
         Thread.__init__(self)
         self.max_mem = 0
-        self.pid = pid
+        self.task = task
+        self.process = task.process
+        self.pid = task.process.pid
         self.daemon = True
+
+
+    def _set_task_attrs(self):
+        """ precondition:
+        if process is a Process object, is_alive() must be False
+        else (process is a Popen object), poll() must be False
+        """
+        if isinstance(self.process, Process):
+            logger.info('Task {} id is done.'.format(self.task.id))
+            self.task.end_time = datetime.now()
+            self.task.max_mem = self.max_mem
+            res = self.task.parent_conn.recv()
+            if res['error'] is not None or self.process.exitcode != 0:
+                self.task.state = 'Failed'
+            else:
+                self.task.state = 'Succeeded'
+
+            self.task.result = res['result']
+            self.task.error = res['error']
+
+        else: # instace of Popen
+            self.task.end_time = datetime.now()
+            self.task.max_mem = self.max_mem
+            self.task.result, self.task.error = self.process.communicate()
+            if self.process.returncode != 0:
+                self.task.state = 'Failed'
+            else:
+                self.task.state = 'Succeeded'
+
 
     def run(self):
         """ execution code """
         while psutil.pid_exists(self.pid):
             try:
+                if isinstance(self.process, Process):
+                    if not self.process.is_alive():
+                        break
+
+                else: # instace of Popen
+                    if not self.process.poll():
+                        break
+
                 mem = get_total_mem(self.pid)
                 if mem > self.max_mem:
                     self.max_mem = mem
             except psutil.NoSuchProcess:
                 break
             except Exception as ex:
-                logger.error(ex)
                 break
 
             time.sleep(0.2)
+        self._set_task_attrs()
 
 
 def parallel(func, params, **kwargs):
@@ -123,6 +163,14 @@ def wait_for(tasks):
         task.wait()
 
 
+class TaskError(Exception):
+    """ Exception thrown when a Task fails and you call the wait command
+    """
+    def __init__(self, task_id, func_name, args, kwargs, error):
+        super(TaskError, self).__init__(u'Task {} failed: {} {} {}\nError:\n{}'\
+            .format(task_id, func_name, args, kwargs, error))
+
+
 class Task(object):
     """ To execute a task """
     def __init__(self, caller, timeout=None, reserved_mem=None,\
@@ -152,6 +200,7 @@ class Task(object):
         self.state = 'Created'
         self.parent_conn = None
         self.child_conn = None
+        self.error = None
         self.result = None
         self.func_name = None
 
@@ -189,7 +238,7 @@ class Task(object):
             line = line.format(self.id, self.process.pid,\
                 self.func_name, args, kwargs)
             logger.info(line)
-            self.monitor = MemMonitor(self.process.pid)
+            self.monitor = TaskMonitor(self)
             self.monitor.start()
 
     def wait(self):
@@ -200,37 +249,11 @@ class Task(object):
         if self.state != 'Started':
             return
 
-        if self.process is None: # for profiling
-            return
+        self.monitor.join() # end monitoring
+        if self.state == 'Failed':
+            raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
 
-        if isinstance(self.process, subprocess.Popen):
-            self.out, self.err = self.process.communicate()
-            self.monitor.join(1) # end monitoring
-            self.end_time = datetime.now()
-            self.max_mem = self.monitor.max_mem
-            if self.process.returncode != 0:
-                self.state = 'Failed'
-                raise Exception(self.err)
-
-        else: # Process obj:
-            self.process.join()
-            self.monitor.join(1) # end monitorin
-            res = self.parent_conn.recv()
-            logger.info('Task {} id is done.'.format(self.id))
-            self.end_time = datetime.now()
-            self.max_mem = self.monitor.max_mem
-            if res['error'] is not None:
-                self.state = 'Failed'
-                raise Exception(res['error'])
-
-            if self.process.exitcode != 0:
-                self.state = 'Failed'
-                raise Exception('ERROR: method failed: {}{},'\
-                    ' kewords:{}'.format(\
-                    self.func_name, self.args, self.kwargs))
-
-            self.result = res['result']
-        self.state = 'Succeeded'
+        return self.result
 
 
     def get_stats(self):
@@ -275,7 +298,8 @@ class Pipeline(object):
         self.wait()
         return [task.result for task in self.tasks]
 
-    #def get_memory_profile(self): TODO
+    def save_stats(self, path):
+        json.dump(self.get_stats(), open(path, 'w'))
 
     def plot_tasks(self, path):
         """ plots the tasks and saves it to an image """
