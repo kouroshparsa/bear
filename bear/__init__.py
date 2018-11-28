@@ -1,6 +1,7 @@
 """
 copyright: (c) 2018 by Kourosh Parsa.
 """
+import sys
 from six import string_types
 from multiprocessing import Process, Pipe
 import time
@@ -28,6 +29,8 @@ def callit(func, conn, *args, **kwargs):
 
     conn.send(res)
     conn.close()
+    if res['error'] is not None:
+        sys.exit(1)
 
 
 def profile(path):
@@ -87,27 +90,31 @@ class TaskMonitor(Thread):
         if process is a Process object, is_alive() must be False
         else (process is a Popen object), poll() must be False
         """
+        self.task.end_time = datetime.now()
+        self.task.max_mem = self.max_mem
+        duration = (self.task.end_time - self.task.start_time).seconds
         if isinstance(self.process, Process):
-            logger.info('Task {} id is done.'.format(self.task.id))
-            self.task.end_time = datetime.now()
-            self.task.max_mem = self.max_mem
             res = self.task.parent_conn.recv()
-            if res['error'] is not None or self.process.exitcode != 0:
+            if res['error'] is not None or self.process.exitcode not in [0, None]:
                 self.task.state = 'Failed'
+                logger.info('Task {} {} failed after {} seconds.'.format(self.task.id, self.task.func_name, duration))
+
             else:
                 self.task.state = 'Succeeded'
+                logger.info('Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
 
             self.task.result = res['result']
             self.task.error = res['error']
 
         else: # instace of Popen
-            self.task.end_time = datetime.now()
-            self.task.max_mem = self.max_mem
             self.task.result, self.task.error = self.process.communicate()
             if self.process.returncode != 0:
                 self.task.state = 'Failed'
+                logger.info('Task {} {} failed after {} seconds.'.format(self.task.id, self.task.func_name, duration))
+
             else:
                 self.task.state = 'Succeeded'
+                logger.info('Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
 
 
     def run(self):
@@ -159,8 +166,16 @@ def wait_for(tasks):
     """ waits for tasks to finish
     tasks: list of Task objects
     """
+    fail_count = 0
     for task in tasks:
-        task.wait()
+        try:
+            task.wait()
+        except TaskError as err:
+            fail_count += 1
+            logger.error(err)
+    if fail_count > 0:
+        raise TaskError('', tasks[0].func_name, '', '', '{} tasks failed.'.format(fail_count))
+
 
 
 class TaskError(Exception):
