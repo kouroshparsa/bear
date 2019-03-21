@@ -12,7 +12,8 @@ BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.realpath("{}/..".format(BASE_DIR))
 sys.path.append(ROOT)
 
-from bear import Task, profile, parallel_wait, Pipeline, TaskError
+from bear import Task, profile, parallel_wait,\
+    Pipeline, TaskError, _get_sub_params
 BIG_FILE_PATH = '/tmp/big_bear.txt'
 PROFILE_PATH = '/tmp/prof'
 
@@ -71,13 +72,13 @@ class TestMem(unittest.TestCase):
 
     def test_mem(self):
         pipe = Pipeline()
-        pipe.parallel(add, [(1,2)])
-        pipe.parallel(subtract, [(1,2)])
+        pipe.async(add, [(1,2)])
+        pipe.async(subtract, [(1,2)])
         stats = {}
         for val in pipe.get_stats():
             stats[val['id']] = val['max_mem']
         assert stats['94a3f806fd092fdfd5d9a1f7ad8eaf0f'] > 200 * 1024 * 1024, 'Got:\n{}'.format(stats)
-        assert stats['fdd8ed4916c6e975c24085bc2b3df67a'] < 45 * 1024 * 1024, 'Got:\n{}'.format(stats)
+        assert stats['fdd8ed4916c6e975c24085bc2b3df67a'] < 50 * 1024 * 1024, 'Got:\n{}'.format(stats)
 
     @classmethod
     def tearDownClass(self):
@@ -123,17 +124,17 @@ class TestBear(unittest.TestCase):
 
     def test3(self):
         pipe = Pipeline()
-        pipe.parallel(add, [(1,1), (2,2)])
+        pipe.async(add, [(1,1), (2,2)])
         results = pipe.results()
         assert results == [2, 4]
 
     def test4(self):
         pipe = Pipeline()
-        pipe.parallel_wait(download, [['url1'], ['url2'], ['url3']], extract=True)
+        pipe.sync(download, [['url1'], ['url2'], ['url3']], extract=True)
 
     def test5(self):
         pipe = Pipeline()
-        pipe.parallel(subtract, [[2, 1], [5, 4]])
+        pipe.async(subtract, [[2, 1], [5, 4]])
         time.sleep(5)
         stats = pipe.get_stats()
         assert stats[0]['duration'] == stats[1]['duration'] == 2,\
@@ -144,21 +145,32 @@ class TestBear(unittest.TestCase):
     def test6(self):
         pipe = Pipeline()
         with self.assertRaises(TaskError) as context:
-            pipe.parallel_wait(subtract, [[1, 2], [1, 'x']])
+            pipe.sync(subtract, [[1, 2], [1, 'x']])
 
     def test7(self):
         pipe = Pipeline()
-        pipe.parallel_wait(subtract, [[1, 2], [-1, -2]])
+        pipe.sync(subtract, [[1, 2], [-1, -2]])
         pipe.save_stats(self.path2)
         stats = json.load(open(self.path2))
         assert isinstance(stats[0]['duration'], int)
+
+    def test8(self):
+        """ test limited concurrency """
+        pipe = Pipeline()
+        pipe.sync(subtract, [[1, 2], [1, 1], [1, 3]], concurrency=2)
+        assert pipe.results() == [-1, 0, -2]
+
+    def test9(self):
+        assert _get_sub_params([['a', 1], ['b', 1], ['c', 1]], 3) == [[['a', 1], ['b', 1], ['c', 1]]]
+        assert _get_sub_params([['a', 1], ['b', 1], ['c', 1]], 2) == [[['a', 1], ['b', 1]], [['c', 1]]]
+
 
 class TestPlots(unittest.TestCase):
     """ test plotting functions """
     def test_duration_plot(self):
         pipe = Pipeline()
-        pipe.parallel_wait(subtract, [[1, 2], [-1, -2]])
-        pipe.parallel_wait(add, [[1, 2], [-1, -2]])
+        pipe.sync(subtract, [[1, 2], [-1, -2]])
+        pipe.sync(add, [[1, 2], [-1, -2]])
         pipe.plot_tasks_duration('/tmp/x.png')
         pipe.plot_tasks_memory('/tmp/y.png')
 

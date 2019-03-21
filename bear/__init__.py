@@ -17,6 +17,7 @@ import psutil
 import json
 from bear import plotting
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def callit(func, conn, *args, **kwargs):
     """ executes a function and sends the results via a pipe """
@@ -141,6 +142,25 @@ class TaskMonitor(Thread):
         self._set_task_attrs()
 
 
+def _get_sub_params(params, concurrency):
+    """ @params: list
+    @concurrency: int
+    returns a list of lists of sub parameters
+    """
+    if concurrency is None or concurrency < 1 or concurrency >= len(params):
+        return [params]
+
+    start = 0
+    end = concurrency
+    res = []
+    while start <= len(params):
+        res.append(params[start:end])
+        start += concurrency
+        end = min(end + concurrency, len(params))
+
+    return res
+
+
 def parallel(func, params, **kwargs):
     """ runs a function with a set of parameters in parallel
     but does not wait for them to finish
@@ -153,12 +173,15 @@ def parallel(func, params, **kwargs):
     return tasks
 
 
-def parallel_wait(func, params, **kwargs):
+def parallel_wait(func, params, concurrency=None, **kwargs):
     """
     runs tasks in parallel and waits for them to finish
     """
-    tasks = parallel(func, params, **kwargs)
-    wait_for(tasks)
+    tasks = []
+    for sub_params in _get_sub_params(params, concurrency): 
+        partial_tasks = parallel(func, sub_params, **kwargs)
+        wait_for(partial_tasks)
+        tasks = tasks + partial_tasks
     return tasks
 
 
@@ -198,7 +221,7 @@ class Task(object):
             when using the Pipeline, it allows you to wait until there is enough
             memory in the operating system for the task to run successfuly
         """
-        self.timeout = None
+        self.timeout = timeout
         self.reserved_mem = None
         self.caller = caller
         self.process = None
@@ -259,11 +282,15 @@ class Task(object):
     def wait(self):
         """ waits for the task to finish """
         if self.state == 'Created':
-            logger.warn('ou have not run the task yet.')
+            logger.warn('You have not run the task yet.')
 
-        if self.state != 'Started':
+        if self.state == 'Failed':
+            raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
+
+        if self.state == 'Succeeded':
             return
 
+        # otherwise state is 'Started'
         self.monitor.join() # end monitoring
         if self.state == 'Failed':
             raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
@@ -287,13 +314,13 @@ class Pipeline(object):
     def __init__(self):
         self.tasks = []
 
-    def parallel_wait(self, func, params, **kwargs):
+    def sync(self, func, params, concurrency=None, **kwargs):
         """ runs tasks in parallel and waits for them to finish """
-        tasks = parallel_wait(func, params, **kwargs)
+        tasks = parallel_wait(func, params, concurrency, **kwargs)
         for task in tasks:
             self.tasks.append(task)
 
-    def parallel(self, func, params, **kwargs):
+    def async(self, func, params, **kwargs):
         """ runs tasks in parallel but does not
         wait for them to  finish """
         for task in parallel(func, params, **kwargs):

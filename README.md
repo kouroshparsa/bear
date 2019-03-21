@@ -34,7 +34,7 @@ def add(a, b):
     return a + b
 
 pipe = Pipeline()
-pipe.parallel(add, [(1,1), (1,2)])
+pipe.sync(add, [(1,1), (1,2)])
 >>> print pipe.results()
 [2, 3]
 ```
@@ -46,7 +46,14 @@ def add(a, b):
     return a + b
 
 pipe = Pipeline()
-pipe.parallel(add, [(1,1), (1,2)])
+pipe.sync(add, [(1,1), (1,2)])
 ```
 This will create the profiling file /tmp/add.prof and put 2 profiling data for each scenario allowing you to compare results
 
+You can run the pipeline asynchronously using the async method.
+You can also specify the concurrency when calling the parallel_wait method. For example, if you have 50 tasks and you want to run only 10 at the time to avoid memory allocation problems, you can run it this way:
+```
+tasks = parallel_wait(add, my_params, concurrency=10)
+for task in tasks:
+    print task.result
+```
