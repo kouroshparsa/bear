@@ -30,6 +30,7 @@ def callit(func, conn, *args, **kwargs):
 
     conn.send(res)
     conn.close()
+    time.sleep(1) # to prevent deadlock due to not receiving the Pipe data
     if res['error'] is not None:
         sys.exit(1)
 
