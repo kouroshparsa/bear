@@ -1,7 +1,7 @@
 from datetime import datetime
 import matplotlib
 matplotlib.use('agg') # run headless
-# with python3, I get an error because matplotlib need tkinter
+# with python3, I get an error because matplotlib needs tkinter
 # but I'm not using it so I can run headless
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
@@ -13,7 +13,7 @@ import matplotlib.cm as cmx
 def plot_system_memory(tasks, path, sys_mem):
     """
     :param tasks: list of Task objects
-    :param path: absolute oath of the output file
+    :param path: absolute path of the output file
     :param sys_mem: list of tuples (datetime, memory as int)
     saves the plot to a file
     """
