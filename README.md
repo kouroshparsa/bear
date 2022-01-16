@@ -10,36 +10,36 @@ How to install:
 
 
 Examples:
-```
-from bear import Task, parallel_wait
+```python
+from bear import Task, parallel_sync
 
 def add(a, b):
     return a + b
 
 task = Task(add)
 task.start(1, 2)
->>> print task.get_stats()
-{'duration': 0, 'start': '01:08:07', 'end': '01:08:07', 'id': '94a3f806fd092fdfd5d9a1f7ad8eaf0f', 'max_mem': 0}
+print(task.get_stats())
+>> {'duration': 0, 'start': '01:08:07', 'end': '01:08:07', 'id': '94a3f806fd092fdfd5d9a1f7ad8eaf0f', 'max_mem': 0}
 
-
-tasks = sync(add, [(1,2), (2,3), (5,5)])
->>> print tasks[0].result, tasks[1].result, tasks[2].result
-3 5 10
+# run 3 tasks in parallel and wait for all to finish:
+tasks = parallel_sync(add, [(1,2), (2,3), (5,5)])
+print(tasks[0].result, tasks[1].result, tasks[2].result)
+>> 3 5 10
 ```
 
 Here is an example for using bear as a pipeline:
-```
+```python
 from bear import Pipeline
 def add(a, b):
     return a + b
 
 pipe = Pipeline()
-pipe.sync(add, [(1,1), (1,2)])
->>> print pipe.results()
-[2, 3]
+pipe.parallel_sync(add, [(1, 1), (1, 2)])
+print(pipe.results())
+>> [2, 3]
 ```
 The pipeline has the ability to resume when it fails. In order to do so, you need to enable that feature as in the example below:
-```
+```python
 from bear import Pipeline
 def div(a, b):
     return a / b
@@ -52,24 +52,23 @@ The pipeline already know that you successfully divided 1 by 1 but you failed to
  the pipeline, it will skip the successful task since you turned on "resume".
 
 
-
-
-You can also profile your tasks:
-```
+You can also profile your tasks as shown below. Note that this does not work on recent windows operating systems.
+```python
 from bear import profile, Pipeline
 @profile('/tmp/add.prof')
 def add(a, b):
     return a + b
 
 pipe = Pipeline()
-pipe.sync(add, [(1,1), (1,2)])
+pipe.parallel_sync(add, [(1, 1), (1, 2)])
 ```
 This will create the profiling file /tmp/add.prof and put 2 profiling data for each scenario allowing you to compare results
 
-You can run the pipeline asynchronously using the async method.
+You can run the pipeline asynchronously using the parallel_async method.
 You can also specify the concurrency when calling the sync method. For example, if you have 50 tasks and you want to run only 10 at the time to avoid memory allocation problems, you can run it this way:
-```
-results = sync(add, my_params, concurrency=10)
+```python
+my_params = [(1, 1), (1, 2)]
+results = parallel_async(add, my_params, concurrency=10)
 print(results)
 ```
 

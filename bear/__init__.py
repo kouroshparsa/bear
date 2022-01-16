@@ -7,6 +7,7 @@ from six import string_types
 from multiprocessing import Process, Pipe
 from threading import Thread
 import time
+import uuid
 from datetime import datetime
 import subprocess
 import hashlib
@@ -16,10 +17,10 @@ import traceback
 import logging
 import psutil
 import json
-from bunch import Bunch, bunchify
 from enum import Enum
 import pickle
 from bear import plotting
+
 logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -53,8 +54,10 @@ def callit(func, conn, *args, **kwargs):
 
 def profile(path):
     """ decorator for profiling """
+
     def decor(func):
         """ inner decorator """
+
         def wrap(*args, **kwargs):
             """ wraps your function """
             profiler = cProfile.Profile()
@@ -62,19 +65,21 @@ def profile(path):
             result = func(*args, **kwargs)
             profiler.disable()
             func_name = '?'
-            if hasattr(func, '__qualname__'): # python3
+            if hasattr(func, '__qualname__'):  # python3
                 func_name = func.__qualname__
             else:  # python2
                 func_name = func.func_name
 
-            line = u'Profiling {} with arguments {} {}\n'\
+            line = u'Profiling {} with arguments {} {}\n' \
                 .format(func_name, args, kwargs)
             with open(path, 'a') as handle:
                 handle.write(line)
             ps = pstats.Stats(profiler, stream=open(path, 'a')).sort_stats('cumulative')
             ps.print_stats()
             return result
+
         return wrap
+
     return decor
 
 
@@ -91,8 +96,16 @@ def get_total_mem(pid):
     return mem
 
 
+class Mem(object):
+    def __init__(self, timestamp, used_mem, percent_mem_used):
+        self.timestamp = timestamp
+        self.used_mem = used_mem
+        self.percent_mem_used = percent_mem_used
+
+
 class SystemMonitor(Thread):
     """ Thread used for monitoring system resources """
+
     def __init__(self, interval):
         Thread.__init__(self)
         self.daemon = True
@@ -104,13 +117,14 @@ class SystemMonitor(Thread):
         while self.interval >= 1:
             if not self.stop_recording:
                 mem_obj = psutil.virtual_memory()
-                obj = Bunch(timestamp=datetime.now(), used_mem=mem_obj.used, percent_mem_used=mem_obj.percent)
+                obj = Mem(datetime.now(), mem_obj.used, mem_obj.percent)
                 self.data.append(obj)
             time.sleep(self.interval)
 
 
 class TaskMonitor(Thread):
     """ Thread used for monitoring the RSS memory and state of a process """
+
     def __init__(self, task):
         """ constructor """
         Thread.__init__(self)
@@ -139,12 +153,13 @@ class TaskMonitor(Thread):
 
             else:
                 self.task.state = State.Succeeded
-                logger.info('Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
+                logger.info(
+                    'Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
 
             self.task.result = res['result']
             self.task.error = res['error']
 
-        else: # instance of Popen
+        else:  # instance of Popen
             self.task.result, self.task.error = self.process.communicate()
             if self.process.returncode != 0:
                 self.task.state = State.Failed
@@ -152,7 +167,8 @@ class TaskMonitor(Thread):
 
             else:
                 self.task.state = State.Succeeded
-                logger.info('Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
+                logger.info(
+                    'Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
 
     def run(self):
         """ execution code """
@@ -162,7 +178,7 @@ class TaskMonitor(Thread):
                     if not self.process.is_alive():
                         break
 
-                else: # instance of Popen
+                else:  # instance of Popen
                     if not self.process.poll():
                         break
 
@@ -227,6 +243,7 @@ def wait_for(tasks):
 class TaskError(Exception):
     """ Exception thrown when a Task fails and you call the wait command
     """
+
     def __init__(self, task_id, func_name, args, kwargs, error):
         super(TaskError, self).__init__(u'Task {} failed: {} {} {}\nError:\n{}'
                                         .format(task_id, func_name, args, kwargs, error))
@@ -234,9 +251,10 @@ class TaskError(Exception):
 
 class Task(object):
     """ To execute a task """
+
     def __init__(self, caller, args=[], kwargs={}, timeout=None,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        stdin=subprocess.PIPE, group_id=None):
+                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                 stdin=subprocess.PIPE, group_id=None):
         """
         caller: a function to run or a bash command in string
         args: list
@@ -269,11 +287,11 @@ class Task(object):
         self.func_name = None
         self.monitor = None
         self.group_id = group_id
+        self.id = str(uuid.uuid4())
 
         # set the task id and func_name:
         if isinstance(self.caller, string_types):
             name = self.caller.encode('utf8')
-            self.id = hashlib.md5(name).hexdigest()
             self.func_name = self.caller
 
         elif self.caller is not None:
@@ -283,13 +301,9 @@ class Task(object):
             else:  # python2
                 self.func_name = self.caller.func_name
 
-            name = u'{},{},{}'.format(self.func_name, self.args, self.kwargs)
-            name = name.encode('utf8')
-            self.id = hashlib.md5(name).hexdigest()
-
     def start(self):
         if self.state == State.Succeeded:
-            return # skip
+            return  # skip
 
         self.state = State.Started
         self.start_time = datetime.now()
@@ -330,7 +344,7 @@ class Task(object):
             return
 
         # otherwise state is 'Started'
-        self.monitor.join() # end monitoring
+        self.monitor.join()  # end monitoring
         if self.state == State.Failed:
             raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
 
@@ -341,14 +355,15 @@ class Task(object):
         self.wait()
         delta = self.end_time - self.start_time
         return {'id': self.id,
-            'start': self.start_time.strftime("%H:%M:%S"),
-            'end': self.end_time.strftime("%H:%M:%S"),
-            'duration': delta.seconds,
-            'max_mem': self.max_mem}
+                'start': self.start_time.strftime("%H:%M:%S"),
+                'end': self.end_time.strftime("%H:%M:%S"),
+                'duration': delta.seconds,
+                'max_mem': self.max_mem}
 
 
 class Pipeline(object):
     """ orchestrates a pipeline """
+
     def __init__(self, resume=False, resume_path=None, memory_monitor_interval=None):
         """
         :param resume: boolean, default=False, set to True to be able to save the state and resume if some tasks fail
@@ -412,7 +427,7 @@ class Pipeline(object):
         """
         if self.resume and os.path.exists(self.resume_path):
             try:
-                data = bunchify(pickle.load(open(self.resume_path, 'rb')))
+                data = pickle.load(open(self.resume_path, 'rb'))
                 for ind, task in enumerate(tasks):
                     if task.id in data and data[task.id].state == State.Succeeded:
                         logger.info('Skipping task {}: {}'.format(task.func_name, task.id))
@@ -433,7 +448,7 @@ class Pipeline(object):
 
             pickle.dump(tasks, open(self.resume_path, "wb"))
 
-    def sync(self, func, args, kwargs={}, concurrency=1000):
+    def parallel_sync(self, func, args, kwargs={}, concurrency=1000):
         """
         :param func: function signature
         :param args: list
@@ -451,7 +466,7 @@ class Pipeline(object):
         self.__save_tasks()
         return [task.result for task in tasks]
 
-    def async(self, func, args, kwargs={}):
+    def parallel_async(self, func, args, kwargs={}):
         """
         :param func: function signature
         :param args: list
@@ -504,6 +519,6 @@ class Pipeline(object):
         self.system_monitor.stop_recording = False
 
         if len(sys_mem) < 1:
-            raise Exception('There is no system memory usage data. '\
-                'You need to turn it on when creating a Pipeline.')
+            raise Exception('There is no system memory usage data. ' \
+                            'You need to turn it on when creating a Pipeline.')
         plotting.plot_system_memory(self.tasks, path, sys_mem)

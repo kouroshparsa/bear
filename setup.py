@@ -6,12 +6,11 @@ a way that it truely used multiple cores of your processor
 Link
 `````
 * Source
-  https://github.com/kouroshparsa/bear
+https://github.com/kouroshparsa/bear
 """
-from setuptools import Command, setup, find_packages
+from setuptools import setup, find_packages
 
-version = '1.4'
-import sys
+version = '1.5'
 setup(
     name='bear',
     version=version,
