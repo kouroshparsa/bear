@@ -10,7 +10,7 @@ https://github.com/kouroshparsa/bear
 """
 from setuptools import setup, find_packages
 
-version = '1.5'
+version = '2.1'
 setup(
     name='bear',
     version=version,

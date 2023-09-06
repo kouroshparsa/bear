@@ -1,5 +1,4 @@
 psutil~=5.9.0
 six~=1.16.0
-bear~=1.4
 matplotlib~=3.5.1
 setuptools~=60.5.0

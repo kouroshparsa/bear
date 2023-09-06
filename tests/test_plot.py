@@ -2,8 +2,9 @@
 Used as a demo driver for plotting features
 copyright: (c) 2014 by Kourosh Parsa.
 """
-from bear import Pipeline
+from bear.pipeline import Pipeline
 from time import sleep
+import tempfile
 
 
 def add(a, b):
@@ -21,12 +22,14 @@ def multiply(a, b):
     return a * b
 
 
-pipe = Pipeline(memory_monitor_interval=1)
-pipe.parallel_sync(add, [[1, 2], [2, 4], [4, 4]])
-pipe.parallel_sync(subtract, [[1, 2], [2, 4], [4, 4]])
-pipe.parallel_sync(subtract, [[1, 2], [2, 4], [4, 4]])
+if __name__ == '__main__':
+    pipe = Pipeline(memory_monitor_interval=1)
+    pipe.parallel_sync(add, [[1, 2], [2, 4], [4, 4]])
+    pipe.parallel_sync(subtract, [[1, 2], [2, 4], [4, 4]])
+    pipe.parallel_sync(subtract, [[1, 2], [2, 4], [4, 4]])
 
-pipe.plot_tasks_duration('/tmp/duration.png')
-pipe.plot_tasks_memory('/tmp/memory.png')
-pipe.plot_system_memory('/tmp/sys_memory.png')
+    with tempfile.NamedTemporaryFile() as tf:
+        pipe.plot_tasks_duration(tf.name)
+        pipe.plot_tasks_memory(tf.name)
+        pipe.plot_system_memory(tf.name)
 

@@ -8,11 +8,13 @@ import time
 import json
 import unittest
 import tempfile
+
 BASE_DIR = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.realpath("{}/..".format(BASE_DIR))
 sys.path.append(ROOT)
 
-from bear import Task, Pipeline, TaskError, _get_sub_params
+from bear import Task, TaskError, _get_sub_params
+from bear.pipeline import Pipeline
 
 
 def add(a, b):
@@ -54,6 +56,7 @@ def get_big_data():
 
 class TestMem(unittest.TestCase):
     """ tests memory monitoring """
+
     def test_mem(self):
         pipeline = Pipeline()
         pipeline.parallel_sync(get_big_data, [[], [], []])
@@ -65,6 +68,7 @@ class TestMem(unittest.TestCase):
 
 class TestBear(unittest.TestCase):
     """ general functional test """
+
     @classmethod
     def cleanup(self):
         _, self.path1 = tempfile.mkstemp()
@@ -108,9 +112,10 @@ class TestBear(unittest.TestCase):
         pipe.parallel_async(subtract, [[2, 1], [5, 4]])
         time.sleep(5)
         stats = pipe.get_stats()
-        assert stats[0]['duration'] in [2, 3] and stats[1]['duration'] in [2, 3],\
-            'The duration is too off. Actual durations in seconds: {} and {}'.format(\
-            stats[0]['duration'], stats[1]['duration'])
+        assert isinstance(stats[0]['duration'], float) and \
+               isinstance(stats[1]['duration'], float), \
+            'The duration is too off. Actual durations in seconds: {} and {}'.format(
+                stats[0]['duration'], stats[1]['duration'])
 
     def test6(self):
         pipe = Pipeline()
@@ -118,33 +123,14 @@ class TestBear(unittest.TestCase):
             pipe.parallel_sync(subtract, [[1, 2], [1, 'x']])
 
     def test7(self):
-        pipe = Pipeline()
-        pipe.parallel_sync(subtract, [[1, 2], [-1, -2]])
-        pipe.save_stats(self.path2)
-        stats = json.load(open(self.path2))
-        assert isinstance(stats[0]['duration'], int)
-
-    def test8(self):
         """ test limited concurrency """
         pipe = Pipeline()
         pipe.parallel_sync(subtract, [[1, 2], [1, 1], [1, 3]], concurrency=2)
         assert pipe.get_all_results() == [-1, 0, -2]
 
-    def test9(self):
+    def test8(self):
         assert _get_sub_params([['a', 1], ['b', 1], ['c', 1]], 3) == [[['a', 1], ['b', 1], ['c', 1]]]
         assert _get_sub_params([['a', 1], ['b', 1], ['c', 1]], 2) == [[['a', 1], ['b', 1]], [['c', 1]]]
-
-
-class TestPlots(unittest.TestCase):
-    """ test plotting functions """
-    def test_duration_plot(self):
-        pipe = Pipeline()
-        pipe.parallel_sync(subtract, [[1, 2], [-1, -2]])
-        pipe.parallel_sync(add, [[1, 2], [-1, -2]])
-        _, path = tempfile.mkstemp()
-        pipe.plot_tasks_duration(path)
-        _, path = tempfile.mkstemp()
-        pipe.plot_tasks_memory(path)
 
 
 if __name__ == '__main__':

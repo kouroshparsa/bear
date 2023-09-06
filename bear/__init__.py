@@ -10,15 +10,11 @@ import time
 import uuid
 from datetime import datetime
 import subprocess
-import hashlib
-import cProfile
-import pstats
 import traceback
 import logging
 import psutil
 import json
 from enum import Enum
-import pickle
 from bear import plotting
 
 logging.basicConfig()
@@ -43,44 +39,19 @@ def callit(func, conn, *args, **kwargs):
         res['result'] = func(*args, **kwargs)
     except Exception as ex:
         traceback_str = traceback.format_exc()
+        logger.error(traceback_str)
         res['error'] = u'{}\n{}'.format(ex, traceback_str)
 
-    conn.send(res)
+    try:
+        conn.send(res)
+    except BrokenPipeError:
+        pass
+
     conn.close()
     time.sleep(DELAY)  # to prevent deadlock due to not receiving the Pipe data
+
     if res['error'] is not None:
         sys.exit(1)
-
-
-def profile(path):
-    """ decorator for profiling """
-
-    def decor(func):
-        """ inner decorator """
-
-        def wrap(*args, **kwargs):
-            """ wraps your function """
-            profiler = cProfile.Profile()
-            profiler.enable()
-            result = func(*args, **kwargs)
-            profiler.disable()
-            func_name = '?'
-            if hasattr(func, '__qualname__'):  # python3
-                func_name = func.__qualname__
-            else:  # python2
-                func_name = func.func_name
-
-            line = u'Profiling {} with arguments {} {}\n' \
-                .format(func_name, args, kwargs)
-            with open(path, 'a') as handle:
-                handle.write(line)
-            ps = pstats.Stats(profiler, stream=open(path, 'a')).sort_stats('cumulative')
-            ps.print_stats()
-            return result
-
-        return wrap
-
-    return decor
 
 
 def get_total_mem(pid):
@@ -141,7 +112,7 @@ class TaskMonitor(Thread):
         """
         self.task.end_time = datetime.now()
         self.task.max_mem = self.max_mem
-        duration = (self.task.end_time - self.task.start_time).seconds
+        duration = (self.task.end_time - self.task.start_time).total_seconds()
         if duration == 1:
             duration = (self.task.end_time - self.task.start_time).microseconds / 1000000.0
 
@@ -157,6 +128,7 @@ class TaskMonitor(Thread):
                     'Task {} {} succeeded after {} seconds.'.format(self.task.id, self.task.func_name, duration))
 
             self.task.result = res['result']
+
             self.task.error = res['error']
 
         else:  # instance of Popen
@@ -190,7 +162,8 @@ class TaskMonitor(Thread):
             except Exception as ex:
                 break
 
-            time.sleep(DELAY)
+            #time.sleep(DELAY)
+
         self._set_task_attrs()
 
 
@@ -219,9 +192,17 @@ def parallel(func, params, **kwargs):
     func: a function reference
     params: list of argument lists
     """
-    tasks = [Task(func) for param in params]
+    if 'kwargs' in kwargs:
+        assert isinstance(kwargs['kwargs'], list), 'kwargs Must be a list'
+        assert len(kwargs['kwargs']) == len(params), 'The length of params and kwargs must match'
+    tasks = []
     for ind, param in enumerate(params):
-        tasks[ind].start(*param, **kwargs)
+        task = Task(func)
+        if 'kwargs' in kwargs:
+            task.start(args=param, kwargs=kwargs['kwargs'][ind])
+        else:
+            task.start(args=param, kwargs=kwargs)
+        tasks.append(task)
     return tasks
 
 
@@ -292,7 +273,7 @@ class Task(object):
         # set the task id and func_name:
         if isinstance(self.caller, string_types):
             name = self.caller.encode('utf8')
-            self.func_name = self.caller
+            self.func_name = name
 
         elif self.caller is not None:
             if hasattr(self.caller, '__qualname__'):  # python3
@@ -301,7 +282,21 @@ class Task(object):
             else:  # python2
                 self.func_name = self.caller.func_name
 
-    def start(self):
+    def get_duration(self):
+        if self.end_time is None:
+            return None
+        return (self.end_time - self.start_time).total_seconds()
+
+    def get_memory(self):
+        return self.max_mem
+
+    def start(self, args=None, kwargs=None):
+        if args:
+            self.args = args
+
+        if kwargs:
+            self.kwargs = kwargs
+
         if self.state == State.Succeeded:
             return  # skip
 
@@ -312,7 +307,9 @@ class Task(object):
                 self.caller,
                 stdout=self.stdout,
                 stdin=self.stdin,
-                stderr=self.stderr, shell=True)
+                stderr=self.stderr,
+                shell=True,
+                start_new_session=False)
 
         elif self.caller is not None:
             self.parent_conn, self.child_conn = Pipe()
@@ -328,10 +325,6 @@ class Task(object):
             self.monitor = TaskMonitor(self)
             self.monitor.start()
 
-    def join(self, *args):
-        self.monitor.terminate()
-        super(Task, self).join(*args)
-
     def wait(self):
         """ waits for the task to finish """
         if self.state == State.Created:
@@ -341,14 +334,20 @@ class Task(object):
             raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
 
         if self.state == State.Succeeded:
-            return
+            return self.result
 
         # otherwise state is 'Started'
-        self.monitor.join()  # end monitoring
+
+        self.result = self.monitor.task.result
         if self.state == State.Failed:
             raise TaskError(self.id, self.func_name, self.args, self.kwargs, self.error)
 
+        self.monitor.join()  # end monitoring
         return self.result
+
+    def get_result(self):
+        """ waits for the task to end and returns the result """
+        return self.wait()
 
     def get_stats(self):
         """ returns a dict with stats about the task """
@@ -357,168 +356,9 @@ class Task(object):
         return {'id': self.id,
                 'start': self.start_time.strftime("%H:%M:%S"),
                 'end': self.end_time.strftime("%H:%M:%S"),
-                'duration': delta.seconds,
-                'max_mem': self.max_mem}
+                'duration': delta.total_seconds(),
+                'max_mem': self.max_mem,
+                'func_name': self.func_name,
+                'group_id': self.group_id}
 
 
-class Pipeline(object):
-    """ orchestrates a pipeline """
-
-    def __init__(self, resume=False, resume_path=None, memory_monitor_interval=None):
-        """
-        :param resume: boolean, default=False, set to True to be able to save the state and resume if some tasks fail
-        :param resume_path: optional, where to save the pipeline state used to resume
-        :param memory_monitor_interval: optional, if set, the pipeline monitors system memory on this interval in seconds
-        """
-        self.group_count = 0
-        self.tasks = []
-        self.resume = resume
-        self.resume_path = os.path.join(os.path.expanduser("~"), '.bear')
-        if resume_path:
-            self.resume_path = resume_path
-
-        self.system_monitor = None
-        if memory_monitor_interval is not None:
-            if memory_monitor_interval < 1:
-                raise Exception('memory_monitor_interval cannot be less than 1')
-            self.system_monitor = SystemMonitor(memory_monitor_interval)
-            self.system_monitor.start()
-
-    def terminate(self):
-        self.system_monitor.terminate()
-
-    def __create_tasks(self, func, arg_list, kwargs):
-        """
-        :param func: function signature
-        :param arg_list: list of lists
-        :param kwargs: dictionary
-        :return: list of Task objects
-        """
-        new_tasks = []
-        for args in arg_list:
-            task = Task(func, args, kwargs, group_id=self.group_count)
-            self.tasks.append(task)
-            new_tasks.append(task)
-
-        self.group_count += 1
-        return new_tasks
-
-    def __has_bandwidth(self, tasks, concurrency):
-        active = sum(task.state == State.Started for task in tasks)
-        return active < concurrency
-
-    def __start_tasks(self, tasks, concurrency=1000):
-        """
-        :param tasks: list of Task objects
-        :param concurrency: int
-        starts the tasks without waiting for them to finish
-        """
-        while sum(task.state == State.Created for task in tasks):
-            for task in tasks:
-                if task.state == State.Created and self.__has_bandwidth(tasks, concurrency):
-                    task.start()
-
-            time.sleep(DELAY)  # necessary to avoid deadlock
-
-    def __skip_previous_tasks(self, tasks):
-        """
-        :param tasks: list of Task
-        if resume option is used, it updates the tasks to skip previously successful tasks
-        """
-        if self.resume and os.path.exists(self.resume_path):
-            try:
-                data = pickle.load(open(self.resume_path, 'rb'))
-                for ind, task in enumerate(tasks):
-                    if task.id in data and data[task.id].state == State.Succeeded:
-                        logger.info('Skipping task {}: {}'.format(task.func_name, task.id))
-                        for attr in TASK_CLONED_ATTRS:
-                            setattr(tasks[ind], attr, data[task.id][attr])
-
-            except Exception as ex:
-                logger.error('Found the pickle file but could not load it: %s', ex)
-
-    def __save_tasks(self):
-        if self.resume:
-            tasks = {}
-            for task in self.tasks:
-                data = {}
-                for attr in TASK_CLONED_ATTRS:
-                    data[attr] = getattr(task, attr)
-                tasks[task.id] = data
-
-            pickle.dump(tasks, open(self.resume_path, "wb"))
-
-    def parallel_sync(self, func, args, kwargs={}, concurrency=1000):
-        """
-        :param func: function signature
-        :param args: list
-        :param concurrency: int
-        :param kwargs: dictionary
-        :return: list of results
-        runs tasks in parallel and waits for them to finish
-        """
-        tasks = self.__create_tasks(func, args, kwargs)
-        self.__skip_previous_tasks(tasks)
-        self.__start_tasks(tasks, concurrency=concurrency)
-        for task in tasks:
-            task.wait()
-
-        self.__save_tasks()
-        return [task.result for task in tasks]
-
-    def parallel_async(self, func, args, kwargs={}):
-        """
-        :param func: function signature
-        :param args: list
-        :param kwargs: dictionary
-        :return: list of Task objects
-        runs tasks in parallel but does not wait for them to  finish
-        """
-        tasks = self.__create_tasks(func, args, kwargs)
-        self.__start_tasks(tasks)
-        return tasks
-
-    def get_stats(self):
-        """ returns a list of dict with task stats """
-        return [task.get_stats() for task in self.tasks]
-
-    def wait(self):
-        """ waits for all the tasks to finish """
-        for task in self.tasks:
-            task.wait()
-
-    def get_all_results(self):
-        """ returns all results as a list """
-        self.wait()
-        return [task.result for task in self.tasks]
-
-    def save_stats(self, path):
-        json.dump(self.get_stats(), open(path, 'w'))
-
-    def plot_tasks_duration(self, path):
-        """
-        :param path: absolute path of the image to save to
-        plots the task durations and saves it to an image
-        """
-        plotting.plot_tasks_duration(self.tasks, path)
-
-    def plot_tasks_memory(self, path):
-        """
-        :param path: absolute path of the image to save to
-        plots the task max memory and saves it to an image
-        """
-        plotting.plot_tasks_memory(self.tasks, path)
-
-    def plot_system_memory(self, path):
-        """
-        :param path: absolute path of the image to save to
-        plots the task memories and system memory. It saves the image to a file
-        """
-        self.system_monitor.stop_recording = True
-        sys_mem = self.system_monitor.data
-        self.system_monitor.stop_recording = False
-
-        if len(sys_mem) < 1:
-            raise Exception('There is no system memory usage data. ' \
-                            'You need to turn it on when creating a Pipeline.')
-        plotting.plot_system_memory(self.tasks, path, sys_mem)
